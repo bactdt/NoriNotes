@@ -1,30 +1,35 @@
-# Nori Notes MVP
+# Nori Notes
 
-最小可用的 macOS 笔记应用：只有文本编辑 + 自动保存，保留原版主题样式。
+macOS 桌面 Markdown 笔记应用（Swift/SwiftUI），所见即所得编辑，安静写作气质，性能优先。
 
 ## 功能
 
-- 新建 / 选择 / 删除笔记（删除有确认弹窗）
-- 标题 + 正文编辑，输入后 0.3 秒自动保存
-- 按标题、正文搜索
-- 四套原版主题（羊皮纸 / 海盐蓝 / 鼠尾草 / 暮色），在工具栏"主题"菜单切换
-- 数据保存在 `~/Library/Application Support/NoriNotes/notebook.json`，退出时强制落盘
+- **Markdown 所见即所得**：标题/加粗/斜体/行内代码/引用实时渲染，按段落增量重样式，输入不全文重排
+- 笔记管理：置顶、归档、标签、搜索（标题/正文/标签）
+- 密码保护：单篇笔记 AES-GCM 加密（PBKDF2 派生密钥），密钥仅存内存，忘记密码无法恢复
+- OCR 导入：图片/PDF → Vision 本机识别 → 加入笔记
+- 导出：Markdown / HTML / DOCX / PDF / JPG / EPUB
+- 外观：四套主题（羊皮纸/海盐蓝/鼠尾草/暮色）+ 应用标志切换
+- 数据保存在 `~/Library/Application Support/NoriNotes/notebook.json`：原子写入，损坏自动备份，退出强制落盘
 
-## 构建与运行（需要 macOS 14+ 与 Xcode Command Line Tools）
+## 构建（需要 macOS 14+）
 
 ```bash
-# 直接运行
-swift run
-
-# 或生成 .app（复用原项目的打包脚本思路）
-swiftc -swift-version 5 -parse-as-library -O \
-  Sources/NoriNotes/*.swift \
-  -framework SwiftUI -framework AppKit -framework Combine \
-  -o NoriNotes
-./NoriNotes
+swift build          # 开发构建
+swift test           # 单元测试（含架构结构测试）
+swift run            # 直接运行
 ```
 
-## 与原版相比移除的部分
+或用 CI：push 到 main 自动跑 lint → test → build，产出 `NoriNotes.app` zip artifact。
 
-密码保护（AES-GCM）、OCR 导入、多格式导出、iCloud 同步、标签、置顶、归档、应用图标切换。
-数据模型改为单文件直接存 `[Note]`；损坏文件会先备份为 `notebook.json.corrupt` 再重建，不会覆盖丢失。
+## 文档
+
+- 架构与分层：`ARCHITECTURE.md`
+- 需求：`docs/requirements.md`
+- 设计理念：`docs/design-docs/core-beliefs.md`
+- CI 决策：`docs/CI.md`
+- 执行计划：`docs/exec-plans/active/`
+
+## 版本
+
+单点声明在 `VERSION`，bump 用 `python3 scripts/bump_version.py [major|minor|patch]`。
