@@ -9,7 +9,7 @@ struct NoriNotesApp: App {
             ContentView()
                 .environmentObject(store)
                 .frame(minWidth: 920, minHeight: 620)
-                .defaultSize(width: 1160, height: 780)
+                .frame(idealWidth: 1160, idealHeight: 780)
         }
         .commands {
             CommandGroup(replacing: .newItem) {
