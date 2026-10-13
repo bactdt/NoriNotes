@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "NoriNotes", targets: ["NoriNotes"])
     ],
     targets: [
-        .executableTarget(name: "NoriNotes", path: "Sources/NoriNotes")
+        .executableTarget(name: "NoriNotes", path: "Sources/NoriNotes"),
+        .testTarget(name: "NoriNotesTests", dependencies: ["NoriNotes"], path: "Tests/NoriNotesTests")
     ]
 )

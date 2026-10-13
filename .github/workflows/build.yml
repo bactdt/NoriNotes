@@ -1,29 +1,41 @@
-name: Build macOS App
+name: CI
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Structure lint
+        run: ./scripts/lint.sh
+
+  test:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Run tests
+        run: swift test
 
-      - name: Build (debug check)
-        run: swift build -v
-
-      - name: Build release binary
-        run: |
-          swift build -c release
-          BIN=$(swift build -c release --show-bin-path)/NoriNotes
-
+  build:
+    runs-on: macos-14
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Build release
+        run: swift build -c release
       - name: Package .app bundle
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           APP="NoriNotes.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp $(swift build -c release --show-bin-path)/NoriNotes "$APP/Contents/MacOS/NoriNotes"
@@ -37,8 +49,8 @@ jobs:
             <key>CFBundleExecutable</key><string>NoriNotes</string>
             <key>CFBundleIdentifier</key><string>com.example.NoriNotes</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleVersion</key><string>1</string>
-            <key>CFBundleShortVersionString</key><string>0.1.0</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
             <key>LSMinimumSystemVersion</key><string>14.0</string>
             <key>NSPrincipalClass</key><string>NSApplication</string>
             <key>NSHighResolutionCapable</key><true/>
@@ -47,10 +59,9 @@ jobs:
           </plist>
           PLIST
           codesign --force --deep --sign - "$APP"
-          ditto -c -k --keepParent "$APP" NoriNotes-macos.zip
-
+          ditto -c -k --keepParent "$APP" "NoriNotes-${VERSION}-macos.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: NoriNotes-macos
-          path: NoriNotes-macos.zip
+          path: NoriNotes-*-macos.zip
