@@ -177,7 +177,7 @@ struct ThemePalette {
             && dark == other.dark
     }
 
-    private func rgba(_ color: Color) -> (Double, Double, Double, Double) {
+    private func rgba(_ color: Color) -> (Float, Float, Float, Float) {
         let resolved = color.resolve(in: EnvironmentValues())
         return (resolved.red, resolved.green, resolved.blue, resolved.opacity)
     }
