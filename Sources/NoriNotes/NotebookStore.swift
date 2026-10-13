@@ -156,7 +156,11 @@ final class NotebookStore: ObservableObject {
 
     func relock(_ id: UUID) {
         guard let index = notes.firstIndex(where: { $0.id == id }), notes[index].isProtected else { return }
-        sealCurrentContent(at: index)
+        guard sealCurrentContent(at: index) else {
+            // 重封失败时不清除内存明文、不解锁密钥，否则唯一明文副本会丢失。
+            statusMessage = "加密失败，笔记保持解锁状态，请重试。"
+            return
+        }
         notes[index].title = "受保护笔记"
         notes[index].body = ""
         notes[index].tags = []
@@ -177,25 +181,48 @@ final class NotebookStore: ObservableObject {
     }
 
     private func persist() {
-        for index in notes.indices { sealCurrentContent(at: index) }
+        for index in notes.indices {
+            guard sealCurrentContent(at: index) else {
+                // 重封失败意味着加密数据与内存明文不一致；此时落盘会保存过期密文。
+                // 中止本次持久化，保留内存中的编辑，等下次成功再写。
+                statusMessage = "加密笔记更新失败，更改尚未写入磁盘，请重试。"
+                return
+            }
+        }
         do {
-            let data = try JSONEncoder.pretty.encode(notes)
+            let data = try JSONEncoder.pretty.encode(Self.redactedForDisk(notes))
             try data.write(to: fileURL, options: .atomic)
         } catch {
             statusMessage = "保存失败：\(error.localizedDescription)"
         }
     }
 
+    /// 已解锁的保护笔记明文只存在于内存；落盘前替换为脱敏副本，密文在 protection 里。
+    private static func redactedForDisk(_ notes: [Note]) -> [Note] {
+        notes.map { note in
+            guard note.isProtected, !note.isLocked else { return note }
+            var redacted = note
+            redacted.title = "受保护笔记"
+            redacted.body = ""
+            redacted.tags = []
+            redacted.isLocked = true
+            return redacted
+        }
+    }
+
     /// 持久化前把已解锁保护笔记的明文重新封存（密钥仍在内存中，不影响继续编辑）。
-    private func sealCurrentContent(at index: Int) {
+    /// 返回 false 表示重封失败，调用方必须中止持久化/锁定，避免编辑内容丢失。
+    private func sealCurrentContent(at index: Int) -> Bool {
         let note = notes[index]
-        guard note.isProtected, !note.isLocked, let key = unlockedKeys[note.id] else { return }
+        guard note.isProtected, !note.isLocked, let key = unlockedKeys[note.id] else { return true }
         do {
             let content = SecureNoteContent(title: note.title, body: note.body, tags: note.tags)
             let combined = try NoteCrypto.reseal(content, using: key)
             notes[index].protection?.combined = combined
+            return true
         } catch {
             statusMessage = "加密笔记更新失败：\(error.localizedDescription)"
+            return false
         }
     }
 

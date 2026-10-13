@@ -60,8 +60,12 @@ struct MarkdownEditor: NSViewRepresentable {
 
 final class Coordinator: NSObject, NSTextViewDelegate {
     var textView: MarkdownTextView?
+    /// 仅在主题实际变化时全文重样式；普通赋值（每次 updateNSView 都会发生）不触发。
     var palette: ThemePalette {
-        didSet { restyleAllParagraphs() }
+        didSet {
+            guard !palette.isVisuallyEqual(oldValue) else { return }
+            applyBaseStyle()
+        }
     }
     let text: Binding<String>
     /// 编辑器内部输入引起的变化标记为 true，避免 updateNSView 回写造成抖动。
@@ -99,12 +103,38 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         paragraphStyles.removeAll()
     }
 
-    /// 输入路径：只重样式"内容实际发生变化的段落"。
+    /// 输入路径：重样式被编辑影响到的段落（粘贴/替换可跨多段）。
+    /// NSTextStorage 会在 editedRange 里记录实际变化位置；基于它而非光标位置。
     func restyleVisibleChangedParagraphs() {
         guard let textView else { return }
         let nsText = textView.string as NSString
-        let editedRange = min(textView.selectedRange.location, nsText.length)
-        let paragraphRange = nsText.paragraphRange(for: NSRange(location: editedRange, length: 0))
+        guard let editedRange = textView.textStorage?.editedRange, editedRange.length >= 0, editedRange.location != NSNotFound else {
+            restyleParagraph(around: textView.selectedRange, in: nsText)
+            return
+        }
+        // 变化范围前后的段落边界各扩一段，覆盖跨段替换的首尾。
+        let startParagraph = nsText.paragraphRange(for: NSRange(location: editedRange.location, length: 0))
+        let endLocation = min(editedRange.location + max(editedRange.length - 1, 0), max(nsText.length - 1, 0))
+        let endParagraph = nsText.paragraphRange(for: NSRange(location: endLocation, length: 0))
+        var cursor = startParagraph.location
+        while cursor < endParagraph.location + endParagraph.length {
+            let paragraphRange = nsText.paragraphRange(for: NSRange(location: cursor, length: 0))
+            restyle(paragraphRange, in: nsText)
+            cursor = paragraphRange.location + paragraphRange.length
+        }
+        // 编辑使后续段落位置平移，缓存失效；按 plain-text 比对保留未受影响段落的缓存意义不大，
+        // 直接丢弃编辑点之后的旧键，避免陈旧条目命中。
+        paragraphStyles = paragraphStyles.filter { $0.key < startParagraph.location }
+    }
+
+    private func restyleParagraph(around range: NSRange, in nsText: NSString) {
+        let paragraphRange = nsText.paragraphRange(for: NSRange(location: min(range.location, max(nsText.length - 1, 0)), length: 0))
+        restyle(paragraphRange, in: nsText)
+    }
+
+    private func restyle(_ paragraphRange: NSRange, in nsText: NSString) {
+        guard let textView else { return }
+        guard paragraphRange.location != NSNotFound, paragraphRange.length > 0, paragraphRange.location + paragraphRange.length <= nsText.length + 1 else { return }
         let plainParagraph = nsText.substring(with: paragraphRange)
         let previous = paragraphStyles[paragraphRange.location]
 
@@ -114,11 +144,6 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         applyMarkdownStyling(in: textView, range: paragraphRange)
         let styled = textView.attributedText().attributedSubstring(from: paragraphRange)
         paragraphStyles[paragraphRange.location] = NSAttributedString(attributedString: styled)
-    }
-
-    private func restyleAllParagraphs() {
-        guard let textView, !isExternalUpdate else { return }
-        applyBaseStyle()
     }
 
     /// 把段落内的 Markdown 标记渲染为属性文本（标题/加粗/斜体/行内代码/引用）。
@@ -139,7 +164,7 @@ final class Coordinator: NSObject, NSTextViewDelegate {
             let level = headingMatch.markerCount
             let size = CGFloat([22.0, 19.0, 17.0, 15.5, 15.0, 15.0][min(level, 6) - 1])
             let weight: NSFont.Weight = level <= 2 ? .semibold : .medium
-            let titleLength = min(paragraph.count, range.length)
+            let titleLength = range.length
             storage.addAttributes([
                 .font: NSFont.systemFont(ofSize: size, weight: weight),
                 .foregroundColor: palette.ink,
@@ -151,7 +176,7 @@ final class Coordinator: NSObject, NSTextViewDelegate {
 
         // 引用行：> text
         if paragraph.hasPrefix(">"), range.length > 0 {
-            let titleLength = min(paragraph.count, range.length)
+            let titleLength = range.length
             storage.addAttributes([
                 .font: NSFont.systemFont(ofSize: 14, weight: .regular),
                 .foregroundColor: palette.muted,
@@ -160,8 +185,8 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         }
 
         // 行内规则：**加粗**、*斜体*、`代码`（逐段处理，不跨段）
-        let contentLength = min(paragraph.count, range.length)
-        let contentRange = NSRange(location: range.location, length: contentLength)
+        // 注意 NSString 偏移是 UTF-16 单位，不能混用 String.count（字素数）。
+        let contentRange = range
         let content = nsText.substring(with: contentRange)
         for (marker, attributes) in MarkdownEditor.inlineRules(palette: palette) {
             let matches = MarkdownEditor.inlineMatches(of: marker, in: content)
@@ -217,7 +242,7 @@ extension MarkdownEditor {
         return HeadingMatch(markerCount: sharpCount)
     }
 
-    /// 行内标记匹配：找到成对包裹的内容。独立纯函数便于单测。
+    /// 行内标记匹配：找到成对包裹的内容（UTF-16 偏移，与 NSRange 一致）。独立纯函数便于单测。
     static func inlineMatches(of marker: String, in content: String) -> [InlineMatch] {
         var results: [InlineMatch] = []
         let ns = content as NSString

@@ -17,6 +17,40 @@ struct Note: Identifiable, Codable {
 
     var isProtected: Bool { protection != nil }
     var displayTitle: String { isLocked ? "受保护笔记" : (title.isEmpty ? "无标题笔记" : title) }
+
+    /// 兼容旧版 notebook.json（无 tags/pin/archive/lock/protection 字段），
+    /// 缺失字段给默认值而不是走损坏备份路径，避免升级丢数据。
+    private enum CodingKeys: String, CodingKey {
+        case id, title, body, tags, createdAt, updatedAt
+        case isPinned, isArchived, isLocked, protection
+    }
+
+    init(id: UUID, title: String, body: String, tags: [String], createdAt: Date, updatedAt: Date, isPinned: Bool, isArchived: Bool, isLocked: Bool, protection: ProtectedNotePayload?) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.tags = tags
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isPinned = isPinned
+        self.isArchived = isArchived
+        self.isLocked = isLocked
+        self.protection = protection
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
+        protection = try container.decodeIfPresent(ProtectedNotePayload.self, forKey: .protection)
+    }
 }
 
 struct ProtectedNotePayload: Codable, Equatable {
@@ -130,4 +164,21 @@ struct ThemePalette {
     let accent: Color
     let border: Color
     let dark: Bool
+
+    /// SwiftUI Color 无法直接比较；用 RGBA 分量近似判等，
+    /// 供编辑器 Coordinator 判断"主题真的变了"才全文重样式。
+    func isVisuallyEqual(_ other: ThemePalette) -> Bool {
+        rgba(canvas) == rgba(other.canvas)
+            && rgba(panel) == rgba(other.panel)
+            && rgba(ink) == rgba(other.ink)
+            && rgba(muted) == rgba(other.muted)
+            && rgba(accent) == rgba(other.accent)
+            && rgba(border) == rgba(other.border)
+            && dark == other.dark
+    }
+
+    private func rgba(_ color: Color) -> (Double, Double, Double, Double) {
+        let resolved = color.resolve(in: EnvironmentValues())
+        return (resolved.red, resolved.green, resolved.blue, resolved.opacity)
+    }
 }
