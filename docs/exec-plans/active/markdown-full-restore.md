@@ -18,26 +18,29 @@
 ## 拆解
 
 - [x] Day 0：文档骨架（AGENTS/ARCHITECTURE/docs/*）、lint、结构测试、CI 更新
-- [ ] 步骤 1：Types 层扩展——Note 加 markdown 标记、恢复 ProtectedNotePayload/NoteCrypto、AppTheme 与 ThemePalette
-- [ ] 步骤 2：Store 层恢复——标签/置顶/归档/保护/搜索过滤；保持防抖与原子写盘
-- [ ] 步骤 3：WYSIWYG 编辑器——NSTextView 封装，按段落增量重样式（性能关键路径）
-- [ ] 步骤 4：UI 恢复——三栏、主题菜单、标志切换、密码 sheet、删除确认
-- [ ] 步骤 5：OCR 服务（Vision/PDFKit）
-- [ ] 步骤 6：导出服务（六格式）
-- [ ] 步骤 7：CI 加 swift test job；文档同步更新
+- [x] 步骤 1：Types 层扩展——恢复 ProtectedNotePayload/NoteCrypto、AppTheme 与 ThemePalette
+- [x] 步骤 2：Store 层恢复——标签/置顶/归档/保护/搜索过滤；保持防抖与原子写盘
+- [x] 步骤 3：WYSIWYG 编辑器——NSTextView 封装，按段落增量重样式（性能关键路径）
+- [x] 步骤 4：UI 恢复——三栏、主题菜单、标志切换、密码 sheet、删除确认
+- [x] 步骤 5：OCR 服务（Vision/PDFKit）
+- [x] 步骤 6：导出服务（六格式）
+- [x] 步骤 7：CI 加 swift test job；文档同步更新
+- [ ] 步骤 8（待用户验收）：真机 WYSIWYG 手感与大文档性能验证
 
 ## 决策日志
 
 | 日期 | 决策 | 理由 |
 |---|---|---|
 | 2026-10-13 | WYSIWYG 用 NSTextView 增量段落重样式 | 性能优先；SwiftUI TextEditor 无底层存储访问能力 |
-| 2026-10-13 | Markdown 渲染用系统 AttributedString(markdown:) | 零依赖，可内化推理 |
+| 2026-10-13 | Markdown 渲染自研轻量解析（headingMarker/inlineMatches 纯函数） | 系统 AttributedString(markdown:) 整块转换无法做段落级增量；自研可完全内化推理 |
+| 2026-10-13 | OCR 追加目标在发起导入时固定（into: noteID） | 修复原版并发导入可能写错笔记的问题 |
 
 ## 进度日志
 
 | 日期 | 进展 | 阻塞 |
 |---|---|---|
 | 2026-10-13 | Day 0 骨架完成 | 无 |
+| 2026-10-13 | 步骤 1-6 全部完成并推送；CI 首跑抓出 4 类编译错误已修复，全绿（run 38391034001） | 无 |
 
 ## 关联
 
