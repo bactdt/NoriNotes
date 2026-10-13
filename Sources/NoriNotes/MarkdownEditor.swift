@@ -33,7 +33,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.textContainer?.widthTracksTextView = true
         textView.drawsBackground = false
-        textView.insertionPointColor = palette.accent
+        textView.insertionPointColor = NSColor(palette.accent)
         context.coordinator.attach(textView)
 
         scrollView.documentView = textView
@@ -52,7 +52,7 @@ struct MarkdownEditor: NSViewRepresentable {
             context.coordinator.applyBaseStyle()
             context.coordinator.isExternalUpdate = false
         }
-        textView.insertionPointColor = palette.accent
+        textView.insertionPointColor = NSColor(palette.accent)
     }
 }
 
@@ -135,16 +135,16 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         storage.setAttributes(body, range: range)
 
         // 标题行：# ~ ######
-        if let headingMatch = paragraph.firstMatch(of: /^(#{1,6})\s+(.*)$/), range.length > 0 {
-            let level = headingMatch.1.count
-            let size = CGFloat([22, 19, 17, 15.5, 15, 15][min(level, 6) - 1])
+        if let headingMatch = MarkdownEditor.headingMarker(in: paragraph), range.length > 0 {
+            let level = headingMatch.markerCount
+            let size = CGFloat([22.0, 19.0, 17.0, 15.5, 15.0, 15.0][min(level, 6) - 1])
             let weight: NSFont.Weight = level <= 2 ? .semibold : .medium
             let titleLength = min(paragraph.count, range.length)
             storage.addAttributes([
-                .font: NSFont.systemFont(ofSize: size, weight: weight, design: .rounded),
+                .font: NSFont.systemFont(ofSize: size, weight: weight),
                 .foregroundColor: palette.ink,
             ], range: NSRange(location: range.location, length: titleLength))
-            let markerLength = min(headingMatch.1.count + 1, titleLength)
+            let markerLength = min(headingMatch.markerCount + 1, titleLength)
             storage.addAttribute(.foregroundColor, value: palette.muted, range: NSRange(location: range.location, length: markerLength))
             return
         }
@@ -164,17 +164,15 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         let contentRange = NSRange(location: range.location, length: contentLength)
         let content = nsText.substring(with: contentRange)
         for (marker, attributes) in MarkdownEditor.inlineRules(palette: palette) {
-            var searchStart = content.startIndex
-            while let matchRange = content.range(of: marker + "[^" + marker.first! + "]*" + marker, options: .regularExpression, range: searchStart..<content.endIndex) {
-                let inner = content[matchRange].dropFirst(marker.count).dropLast(marker.count)
-                let nsInner = String(inner) as NSString
-                let offset = content.distance(from: content.startIndex, to: matchRange.lowerBound)
-                let fullRange = NSRange(location: contentRange.location + offset, length: content.distance(from: matchRange.lowerBound, to: matchRange.upperBound))
+            let matches = MarkdownEditor.inlineMatches(of: marker, in: content)
+            for match in matches {
+                let nsInner = match.inner as NSString
+                let offset = match.offset
+                let fullRange = NSRange(location: contentRange.location + offset, length: match.fullLength)
                 let innerRange = NSRange(location: contentRange.location + offset + marker.count, length: nsInner.length)
                 storage.addAttributes(attributes, range: innerRange)
                 storage.addAttribute(.foregroundColor, value: palette.muted, range: NSRange(location: fullRange.location, length: marker.count))
                 storage.addAttribute(.foregroundColor, value: palette.muted, range: NSRange(location: fullRange.location + fullRange.length - marker.count, length: marker.count))
-                searchStart = matchRange.upperBound
             }
         }
     }
@@ -200,14 +198,53 @@ final class MarkdownTextView: NSTextView {
 // MARK: - 规则表
 
 extension MarkdownEditor {
+    struct HeadingMatch {
+        let markerCount: Int
+    }
+
+    struct InlineMatch {
+        let inner: String
+        let offset: Int
+        let fullLength: Int
+    }
+
+    /// 标题行解析：返回 # 数量。独立纯函数便于单测。
+    static func headingMarker(in paragraph: String) -> HeadingMatch? {
+        guard let sharpCount = paragraph.prefix(while: { $0 == "#" }).count as Int?,
+              sharpCount >= 1, sharpCount <= 6,
+              paragraph.count > sharpCount,
+              paragraph[paragraph.index(paragraph.startIndex, offsetBy: sharpCount)] == " " else { return nil }
+        return HeadingMatch(markerCount: sharpCount)
+    }
+
+    /// 行内标记匹配：找到成对包裹的内容。独立纯函数便于单测。
+    static func inlineMatches(of marker: String, in content: String) -> [InlineMatch] {
+        var results: [InlineMatch] = []
+        let ns = content as NSString
+        let pattern = NSRegularExpression.escapedPattern(for: marker) + "([^" + NSRegularExpression.escapedPattern(for: marker) + "]+)" + NSRegularExpression.escapedPattern(for: marker)
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return results }
+        let full = NSRange(location: 0, length: ns.length)
+        for match in regex.matches(in: content, range: full) {
+            let innerRange = match.range(at: 1)
+            guard innerRange.location != NSNotFound else { continue }
+            results.append(InlineMatch(
+                inner: ns.substring(with: innerRange),
+                offset: match.range.location,
+                fullLength: match.range.length
+            ))
+        }
+        return results
+    }
+
     /// 行内 Markdown 规则（顺序即优先级）。独立函数便于单测。
     static func inlineRules(palette: ThemePalette) -> [(String, [NSAttributedString.Key: Any])] {
-        [
+        let codeBackground = palette.accent.opacity(0.10)
+        return [
             ("**", [.font: NSFont.boldSystemFont(ofSize: 15)]),
-            ("*", [.font: NSFont.systemFont(ofSize: 15, weight: .regular).withSlant()]),
+            ("*", [.font: NSFont.systemFont(ofSize: 15).withSlant()]),
             ("`", [
                 .font: NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular),
-                .backgroundColor: palette.accent.opacity(0.10),
+                .backgroundColor: NSColor(codeBackground),
             ]),
         ]
     }
@@ -217,22 +254,6 @@ private extension NSFont {
     func withSlant() -> NSFont {
         NSFontManager.shared.convert(self, toHaveTrait: [.italicFontMask])
     }
-}
-
-private extension String {
-    func firstMatch(of pattern: Regex<Substring>) -> Regex<Substring>.Match? {
-        self.firstMatch(of: pattern)
-    }
-}
-
-private extension String {
-    subscript(range: some RangeExpression) -> Substring {
-        self[range]
-    }
-}
-
-private extension NSAttributedString {
-    var attributedSubstringSupported: Bool { true }
 }
 
 extension NSTextView {
