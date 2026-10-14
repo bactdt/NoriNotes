@@ -37,6 +37,7 @@
 | 2026-10-13 | Codex 评审后：Note 自定义 init(from:) 给旧字段默认值 | 旧版 notebook.json 升级时按损坏处理会丢数据（P1） |
 | 2026-10-13 | Codex 评审后：落盘前脱敏已解锁保护笔记；重封失败中止持久化与锁定 | 防止明文写入 JSON（P1）与重封失败丢失唯一明文（P2） |
 | 2026-10-13 | Codex 评审后：palette 仅在视觉值变化时全文重样式；编辑范围基于 textStorage.editedRange；NSRange 全部 UTF-16 单位 | 打字路径性能契约（P1）、跨段粘贴（P2）、emoji 长度错误（P2） |
+| 2026-10-14 | 二轮 Codex 评审后：改用 shouldChangeTextIn 前置快照编辑范围，弃用 textStorage.editedRange；删除冗余 paste override | editedRange 仅在 processEditing 内文档有效，之外读取是未定义行为；paste override 曾致跨段粘贴重复重样式（BDFL 验证后确认 root cause，未照搬建议方案） |
 
 ## 进度日志
 
