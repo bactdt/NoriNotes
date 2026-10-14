@@ -72,6 +72,11 @@ final class Coordinator: NSObject, NSTextViewDelegate {
     var isInternalEdit = false
     var isExternalUpdate = false
 
+    /// shouldChangeTextIn 在编辑落地前记录变更起点与替换长度；textDidChange 据此
+    /// 确定受影响段落。不读 textStorage.editedRange——它仅在 processEditing 内有效，
+    /// 之外属于未定义值。逐次编辑严格配对（一次 shouldChangeTextIn 对一次 textDidChange）。
+    private var pendingEdit: (location: Int, replacementLength: Int)?
+
     private var paragraphStyles: [Int: NSAttributedString] = [:]
 
     init(text: Binding<String>, palette: ThemePalette) {
@@ -86,11 +91,16 @@ final class Coordinator: NSObject, NSTextViewDelegate {
 
     // MARK: NSTextViewDelegate
 
+    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        pendingEdit = (affectedCharRange.location, (replacementString as NSString?)?.length ?? 0)
+        return true
+    }
+
     func textDidChange(_ notification: Notification) {
         guard let textView else { return }
         isInternalEdit = true
         text.wrappedValue = textView.string
-        restyleVisibleChangedParagraphs()
+        restyleEditedParagraphs()
         isInternalEdit = false
     }
 
@@ -103,16 +113,21 @@ final class Coordinator: NSObject, NSTextViewDelegate {
         paragraphStyles.removeAll()
     }
 
-    /// 输入路径：重样式被编辑影响到的段落（粘贴/替换可跨多段）。
-    /// NSTextStorage 会在 editedRange 里记录实际变化位置；基于它而非光标位置。
-    func restyleVisibleChangedParagraphs() {
+    /// 输入路径：重样式被本次编辑影响到的段落（粘贴/替换可跨多段）。
+    /// 变更信息来自编辑前的 pendingEdit 快照，而非编辑后的光标或 storage 状态。
+    func restyleEditedParagraphs() {
         guard let textView else { return }
         let nsText = textView.string as NSString
-        guard let editedRange = textView.textStorage?.editedRange, editedRange.length >= 0, editedRange.location != NSNotFound else {
+        defer { pendingEdit = nil }
+        guard let pendingEdit else {
             restyleParagraph(around: textView.selectedRange, in: nsText)
             return
         }
-        // 变化范围前后的段落边界各扩一段，覆盖跨段替换的首尾。
+        // 旧长度 = 新长度 - 变化量；clamp 后遍历受影响的段落区间。
+        let editedRange = NSRange(
+            location: min(pendingEdit.location, max(nsText.length - 1, 0)),
+            length: max(nsText.length - (pendingEdit.location + pendingEdit.replacementLength), 0)
+        )
         let startParagraph = nsText.paragraphRange(for: NSRange(location: editedRange.location, length: 0))
         let endLocation = min(editedRange.location + max(editedRange.length - 1, 0), max(nsText.length - 1, 0))
         let endParagraph = nsText.paragraphRange(for: NSRange(location: endLocation, length: 0))
@@ -213,11 +228,6 @@ final class Coordinator: NSObject, NSTextViewDelegate {
 
 final class MarkdownTextView: NSTextView {
     var coordinator: Coordinator?
-
-    override func paste(_ sender: Any?) {
-        super.paste(sender)
-        coordinator?.textDidChange(Notification(name: NSText.didChangeNotification, object: self, userInfo: nil))
-    }
 }
 
 // MARK: - 规则表
